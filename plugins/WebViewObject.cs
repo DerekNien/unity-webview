@@ -56,6 +56,7 @@ public class WebViewObject : MonoBehaviour
     Callback onLoaded;
     Callback onHooked;
     bool visibility;
+    bool openLinksInExternalBrowser;
     bool alertDialogEnabled;
     bool scrollBounceEnabled;
     int mMarginLeft;
@@ -539,6 +540,23 @@ public class WebViewObject : MonoBehaviour
     public bool GetVisibility()
     {
         return visibility;
+    }
+
+    public void SetOpenLinksInExternalBrowser(bool isOpen)
+    {
+#if UNITY_WEBPLAYER
+        //TODO: UNSUPPORTED
+#elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        //TODO: UNSUPPORTED
+#elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX || UNITY_IPHONE
+        //TODO: UNSUPPORTED
+#elif UNITY_ANDROID
+        if (webView == null)
+            return;
+        openLinksInExternalBrowser = isOpen;
+        webView.Call("SetOpenLinksInExternalBrowser", isOpen);
+#endif
+        openLinksInExternalBrowser = isOpen;
     }
 
     public void SetAlertDialogEnabled(bool e)
