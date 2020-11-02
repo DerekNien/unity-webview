@@ -35,11 +35,13 @@ import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.util.Pair;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
 import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.webkit.GeolocationPermissions.Callback;
+import android.webkit.HttpAuthHandler;
 import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.JsPromptResult;
@@ -62,6 +64,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Hashtable;
@@ -119,6 +122,11 @@ public class CWebViewPlugin extends Fragment {
 
     private static long instanceCount;
     private long mInstanceId;
+    private boolean mPaused;
+    private List<Pair<String, CWebViewPlugin>> mTransactions;
+
+    private String mBasicAuthUserName;
+    private String mBasicAuthPassword;
 
     public CWebViewPlugin() {
     }
@@ -202,19 +210,26 @@ public class CWebViewPlugin extends Fragment {
     public void Init(final String gameObject, final boolean transparent, final String ua) {
         final CWebViewPlugin self = this;
         final Activity a = UnityPlayer.currentActivity;
+        instanceCount++;
+        mInstanceId = instanceCount;
         a.runOnUiThread(new Runnable() {public void run() {
             if (mWebView != null) {
                 return;
             }
 
             setRetainInstance(true);
-            instanceCount++;
-            mInstanceId = instanceCount;
-            a
-                .getFragmentManager()
-                .beginTransaction()
-                .add(0, self, "CWebViewPlugin" + mInstanceId)
-                .commit();
+            if (mPaused) {
+                if (mTransactions == null) {
+                    mTransactions = new ArrayList<Pair<String, CWebViewPlugin>>();
+                }
+                mTransactions.add(Pair.create("add", self));
+            } else {
+                a
+                    .getFragmentManager()
+                    .beginTransaction()
+                    .add(0, self, "CWebViewPlugin" + mInstanceId)
+                    .commit();
+            }
 
             mAlertDialogEnabled = true;
             mCustomHeaders = new Hashtable<String, String>();
@@ -447,6 +462,15 @@ public class CWebViewPlugin extends Fragment {
                 }
 
                 @Override
+                public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
+                    if (mBasicAuthUserName != null && mBasicAuthPassword != null) {
+                        handler.proceed(mBasicAuthUserName, mBasicAuthPassword);
+                    } else {
+                        handler.cancel();
+                    }
+                }
+
+                @Override
                 public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
                     if (mCustomHeaders == null || mCustomHeaders.isEmpty()) {
                         return super.shouldInterceptRequest(view, url);
@@ -605,11 +629,19 @@ public class CWebViewPlugin extends Fragment {
             mWebView.destroy();
             mWebView = null;
 
-            a
-                .getFragmentManager()
-                .beginTransaction()
-                .remove(self)
-                .commit();
+            if (mPaused) {
+                if (mTransactions == null) {
+                    mTransactions = new ArrayList<Pair<String, CWebViewPlugin>>();
+                }
+                mTransactions.add(Pair.create("remove", self));
+            } else {
+                a
+                    .getFragmentManager()
+                    .beginTransaction()
+                    .remove(self)
+                    .commit();
+            }
+
         }});
     }
 
@@ -690,6 +722,16 @@ public class CWebViewPlugin extends Fragment {
         }});
     }
 
+    public void Reload() {
+        final Activity a = UnityPlayer.currentActivity;
+        a.runOnUiThread(new Runnable() {public void run() {
+            if (mWebView == null) {
+                return;
+            }
+            mWebView.reload();
+        }});
+    }
+
     public void SetMargins(int left, int top, int right, int bottom) {
         final FrameLayout.LayoutParams params
             = new FrameLayout.LayoutParams(
@@ -730,13 +772,38 @@ public class CWebViewPlugin extends Fragment {
     }
 
     // cf. https://stackoverflow.com/questions/31788748/webview-youtube-videos-playing-in-background-on-rotation-and-minimise/31789193#31789193
-    public void OnApplicationPause(final boolean paused) {
+    public void OnApplicationPause(boolean paused) {
+        mPaused = paused;
         final Activity a = UnityPlayer.currentActivity;
         a.runOnUiThread(new Runnable() {public void run() {
+            if (!mPaused) {
+                if (mTransactions != null) {
+                    for (Pair<String, CWebViewPlugin> pair : mTransactions) {
+                        CWebViewPlugin self = pair.second;
+                        switch (pair.first) {
+                        case "add":
+                            a
+                                .getFragmentManager()
+                                .beginTransaction()
+                                .add(0, self, "CWebViewPlugin" + mInstanceId)
+                                .commit();
+                            break;
+                        case "remove":
+                            a
+                                .getFragmentManager()
+                                .beginTransaction()
+                                .remove(self)
+                                .commit();
+                            break;
+                        }
+                    }
+                    mTransactions.clear();
+                }
+            }
             if (mWebView == null) {
                 return;
             }
-            if (paused) {
+            if (mPaused) {
                 mWebView.onPause();
                 if (mWebView.getVisibility() == View.VISIBLE) {
                     // cf. https://qiita.com/nbhd/items/d31711faa8852143f3a4
@@ -807,9 +874,29 @@ public class CWebViewPlugin extends Fragment {
         }
     }
 
+    public void SaveCookies()
+    {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+        {
+           CookieManager.getInstance().flush();
+        } else {
+           final Activity a = UnityPlayer.currentActivity;
+           CookieSyncManager cookieSyncManager = CookieSyncManager.createInstance(a);
+           cookieSyncManager.startSync();
+           cookieSyncManager.stopSync();
+           cookieSyncManager.sync();
+        }
+    }
+
     public String GetCookies(String url)
     {
         CookieManager cookieManager = CookieManager.getInstance();
         return cookieManager.getCookie(url);
+    }
+
+    public void SetBasicAuthInfo(final String userName, final String password)
+    {
+        mBasicAuthUserName = userName;
+        mBasicAuthPassword = password;
     }
 }
