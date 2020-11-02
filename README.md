@@ -19,6 +19,21 @@ below:
 
 *NOTE: The current implementation for Android utilizes Android Fragment for enabling the file input field after https://github.com/gree/unity-webview/commit/a1a2a89d2d0ced366faed9db308ccf4f689a7278 and may cause new issues that were not found before. If you don't need the file input field, you can install `dist/unity-webview-nofragment.unitypackage` or `dist/unity-webview-nofragment.zip` for selecting the variant without Fragment.*
 
+## Package Manager
+
+If you use Unity 2019.1 or later, the plugin can also be imported with Package Manager, by adding
+the following entry in your `Packages/manifest.json`:
+
+```json
+{
+  "dependencies": {
+    ...
+    "net.gree.unity-webview": "https://github.com/gree/unity-webview.git?path=/dist/package",
+    ...
+  }
+}
+```
+
 ## Common Notes
 
 ### UnityWebViewPostprocessBuild.cs
@@ -33,16 +48,9 @@ out adequate parts in the script.
 
 ### Mac (Editor)
 
-#### Auto Graphics API/Metal Editor Support
+#### macOS Version
 
-The current implementation reiles on several OpenGL APIs so you need to disable "Auto graphics API"
-and specify OpenGLCore as below.
-
-![auto-graphics-api-setting-for-mac.png](doc/img/auto-graphics-api-setting-for-mac.png)
-
-If you work only in (recent) Unity Editor, you may just disable "Metal Editor Support" (cf. https://github.com/gree/unity-webview/issues/383 ).
-
-![metal-editor-support-setting-for-mac.png](doc/img/metal-editor-support-setting-for-mac.png)
+The current implementation utilizes https://developer.apple.com/documentation/webkit/wkwebview/2873260-takesnapshotwithconfiguration to capture an offscreen webview image so that macOS 10.13 (High Sierra) or later is required.
 
 #### App Transport Security
 
@@ -80,13 +88,22 @@ or invoke the following from your terminal,
 * https://github.com/gree/unity-webview/issues/64
 * https://onevcat.zendesk.com/hc/en-us/articles/215527307-I-cannot-open-the-web-page-in-Unity-Editor-
 
-#### WebViewSeparated.bundle
+#### Separeted Mode
 
-WebViewSeparated.bundle is a variation of WebView.bundle. It is based
-on https://github.com/gree/unity-webview/pull/161 . As noted in the
-pull-request, it shows a separate window and allows a developer to
-utilize the Safari debugger. For enabling it, please define
-`WEBVIEW_SEPARATED`.
+A separate window will be shown if `separated: true` is specified:
+
+```csharp
+        webViewObject = (new GameObject("WebViewObject")).AddComponent<WebViewObject>();
+        webViewObject.Init(
+            ...
+#if UNITY_EDITOR
+            separated: true
+#endif
+            ...);
+```
+
+This is based on https://github.com/gree/unity-webview/pull/161 and allows a developer to utilize
+the Safari debugger.
 
 ### iOS
 
@@ -158,6 +175,10 @@ implementation will adjust Unity's SurfaceView z order. Please refer
 `plugins/Android/src/net/gree/unitywebview/CUnityPlayerActivity.java`
 and `plugins/Android/src/net/gree/unitywebview/CUnityPlayer.java` if
 you already have your own activity implementation.
+
+#### usesCleartextTraffic
+
+For allowing http cleartext traffic for Android API level 28 or higher, please define `UNITYWEBVIEW_ANDROID_USES_CLEARTEXT_TRAFFIC` so that `Assets/Plugins/Editor/UnityWebViewPostprocessBuild.cs` adds `android:usesCleartextTraffic="true"` to the applicaiton.
 
 #### Camera/Audio Permission/Feature
 

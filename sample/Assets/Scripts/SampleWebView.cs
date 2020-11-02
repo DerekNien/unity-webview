@@ -58,7 +58,7 @@ public class SampleWebView : MonoBehaviour
             ld: (msg) =>
             {
                 Debug.Log(string.Format("CallOnLoaded[{0}]", msg));
-#if UNITY_EDITOR_OSX || !UNITY_ANDROID
+#if UNITY_EDITOR_OSX || (!UNITY_ANDROID && !UNITY_WEBPLAYER && !UNITY_WEBGL)
                 // NOTE: depending on the situation, you might prefer
                 // the 'iframe' approach.
                 // cf. https://github.com/gree/unity-webview/issues/189
@@ -99,16 +99,36 @@ public class SampleWebView : MonoBehaviour
                   }
                 ");
 #endif
+#elif UNITY_WEBPLAYER || UNITY_WEBGL
+                webViewObject.EvaluateJS(
+                    "window.Unity = {" +
+                    "   call:function(msg) {" +
+                    "       parent.unityWebView.sendMessage('WebViewObject', msg)" +
+                    "   }" +
+                    "};");
 #endif
                 webViewObject.EvaluateJS(@"Unity.call('ua=' + navigator.userAgent)");
             },
             //ua: "custom user agent string",
+#if UNITY_EDITOR
+            separated: false,
+#endif
             enableWKWebView: true);
 #if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
         webViewObject.bitmapRefreshCycle = 1;
 #endif
+        // cf. https://github.com/gree/unity-webview/pull/512
+        // Added alertDialogEnabled flag to enable/disable alert/confirm/prompt dialogs. by KojiNakamaru · Pull Request #512 · gree/unity-webview
         //webViewObject.SetAlertDialogEnabled(false);
+
+        // cf. https://github.com/gree/unity-webview/pull/550
+        // introduced SetURLPattern(..., hookPattern). by KojiNakamaru · Pull Request #550 · gree/unity-webview
         //webViewObject.SetURLPattern("", "^https://.*youtube.com", "^https://.*google.com");
+
+        // cf. https://github.com/gree/unity-webview/pull/570
+        // Add BASIC authentication feature (Android and iOS with WKWebView only) by takeh1k0 · Pull Request #570 · gree/unity-webview
+        //webViewObject.SetBasicAuthInfo("id", "password");
+
         webViewObject.SetMargins(5, 100, 5, Screen.height / 4);
         webViewObject.SetVisibility(true);
 
@@ -153,14 +173,6 @@ public class SampleWebView : MonoBehaviour
         } else {
             webViewObject.LoadURL("StreamingAssets/" + Url.Replace(" ", "%20"));
         }
-        webViewObject.EvaluateJS(
-            "parent.$(function() {" +
-            "   window.Unity = {" +
-            "       call:function(msg) {" +
-            "           parent.unityWebView.sendMessage('WebViewObject', msg)" +
-            "       }" +
-            "   };" +
-            "});");
 #endif
         yield break;
     }
@@ -179,7 +191,11 @@ public class SampleWebView : MonoBehaviour
         }
         GUI.enabled = true;
 
-        GUI.TextField(new Rect(200, 10, 300, 80), "" + webViewObject.Progress());
+        if (GUI.Button(new Rect(200, 10, 80, 80), "r")) {
+            webViewObject.Reload();
+        }
+
+        GUI.TextField(new Rect(300, 10, 200, 80), "" + webViewObject.Progress());
 
         if (GUI.Button(new Rect(600, 10, 80, 80), "*")) {
             var g = GameObject.Find("WebViewObject");

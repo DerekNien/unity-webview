@@ -336,8 +336,7 @@ static NSMutableArray *_instances = [[NSMutableArray alloc] init];
         decisionHandler(WKNavigationActionPolicyCancel);
         return;
     }
-    if ([url rangeOfString:@"//itunes.apple.com/"].location != NSNotFound ||
-        [url rangeOfString:@"//www.youtube.com/watch"].location != NSNotFound) {
+    if ([url rangeOfString:@"//itunes.apple.com/"].location != NSNotFound) {
         [[UIApplication sharedApplication] openURL:nsurl];
         decisionHandler(WKNavigationActionPolicyCancel);
         return;

@@ -1,12 +1,12 @@
-var unityWebView =
+var unityWebView = 
 {
     loaded: [],
 
     init : function (name) {
         $containers = $('.webviewContainer');
         if ($containers.length === 0) {
-            $('<div style="position: absolute; left: 0px; width: 100%; height: 100%; top: 0px; pointer-events: none;"><div class="webviewContainer" style="overflow: hidden; position: relative; width: 100%; height: 100%; z-index: 1;"></div></div>')
-                .appendTo($('#gameContainer'));
+            $('<div style="position: absolute; left: 0px; width: 100%; height: 100%;"><div class="webviewContainer" style="overflow:hidden; position:relative; width:100%; height:100%; top:-100%; pointer-events:none; z-index: 1;"></div></div')
+                .appendTo($('#unityPlayer'));
         }
         var $last = $('.webviewContainer:last');
         var clonedTop = parseInt($last.css('top')) - 100;
@@ -22,7 +22,7 @@ var unityWebView =
                 contents.find('a').click(function (e) {
                     var href = $.trim($(this).attr('href'));
                     if (href.substr(0, 6) === 'unity:') {
-                        unityInstance.SendMessage(name, "CallFromJS", href.substring(6, href.length));
+                        u.getUnity().SendMessage(name, "CallFromJS", href.substring(6, href.length));
                         e.preventDefault();
                     } else {
                         w.location.replace(href);
@@ -37,24 +37,22 @@ var unityWebView =
                         if ($this.attr('method').toLowerCase() == 'get') {
                             message += '?' + $this.serialize();
                         }
-                        unityInstance.SendMessage(name, "CallFromJS", message);
+                        u.getUnity().SendMessage(name, "CallFromJS", message);
                         return false;
                     }
                     return true;
-                });
-
-                unityInstance.SendMessage(name, "CallOnLoaded", location.href);
+                }); 
             });
     },
 
     sendMessage: function (name, message) {
-        unityInstance.SendMessage(name, "CallFromJS", message);
+        u.getUnity().SendMessage(name, "CallFromJS", message);
     },
 
     setMargins: function (name, left, top, right, bottom) {
-        var container = $('#gameContainer');
-        var width = container.width();
-        var height = container.height();
+        var $player = $('#unityPlayer');
+        var width = $player.width();
+        var height = $player.height();
 
         var lp = left / width * 100;
         var tp = top / height * 100;
