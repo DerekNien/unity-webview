@@ -20,7 +20,7 @@
 
 require 'fileutils'
 
-UNITY="/Applications/UnityCurrent/Unity.app/Contents"
+UNITY="/Applications/Unity/Hub/Editor/2019.4.14f1/Unity.app/Contents"
 
 CNT = 2
 SRCDIR = Array.new(CNT);
@@ -59,7 +59,7 @@ task :build do
   end
   ["Android"].each do |t|
     Dir.chdir("#{SRCDIR[0]}/#{t}") do
-      sh "./install.sh --unity /Applications/Unity5.6.1f1"
+      sh "./install.sh"
     end
   end
   ["Mac"].each do |t|

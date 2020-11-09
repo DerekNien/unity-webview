@@ -11,11 +11,12 @@ BUILD_DIR="${CWD}/gradle_build"
 LIBS_DIR="${BUILD_DIR}/libs"
 JAVA_DIR="${BUILD_DIR}/src/main/java"
 BIN_DIR="${CWD}/bin"
+UNITY_SRC_DIR="${JAVA_DIR}/com/unity3d/player"
 
 # options
 MODE="Release"
 SCRIPTING_BACKEND="il2cpp"
-UNITY="/Applications/Unity5.6.1f1"
+UNITY="/Applications/Unity/Hub/Editor/2019.4.14f1"
 
 for OPT in $*; do
   case $OPT in
@@ -36,11 +37,13 @@ for OPT in $*; do
 done
 
 UNITY_JAVA_LIB="${UNITY}/PlaybackEngines/AndroidPlayer/Variations/${SCRIPTING_BACKEND}/${MODE}/Classes/classes.jar"
+UNITY_JAVA_SRC="${UNITY}/PlaybackEngines/AndroidPlayer/Source/com/unity3d/player/UnityPlayerActivity.java"
 
 # clean
 rm -rf ${JAVA_DIR}/*
 rm -rf ${LIB_DIR}
 rm -f ${BUILD_DIR}/src/main/AndroidManifest.xml
+rm -f ${BUILD_DIR}/src/main/com/unity3d/player/UnityPlayerActivity.java
 
 pushd $CWD
 
@@ -51,8 +54,10 @@ mkdir -p ${LIBS_DIR}
 mkdir -p ${BIN_DIR}
 mkdir -p ${DEST_DIR}
 mkdir -p ${JAVA_DIR}
+mkdir -p ${UNITY_SRC_DIR}
 
 cp ${UNITY_JAVA_LIB} ${LIBS_DIR}
+cp ${UNITY_JAVA_SRC} ${UNITY_SRC_DIR}
 cp -r src-nofragment/net ${JAVA_DIR}
 cp AndroidManifest.xml ${BUILD_DIR}/src/main
 
