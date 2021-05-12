@@ -20,7 +20,7 @@
 
 require 'fileutils'
 
-UNITY="/Applications/UnityCurrent/Unity.app/Contents"
+UNITY="/Applications/Unity/Hub/Editor/2019.4.26f1/Unity.app/Contents"
 
 CNT = 2
 SRCDIR = Array.new(CNT);
@@ -64,7 +64,7 @@ task :build do
   end
   ["Android"].each do |t|
     Dir.chdir("#{SRCDIR[0]}/#{t}") do
-      sh "git clean -dxf .; ./install.sh --unity /Applications/Unity/Hub/Editor/2019.4.26f1"
+      sh "./install.sh --unity /Applications/Unity/Hub/Editor/2019.4.26f1"
     end
   end
   ["Mac"].each do |t|
