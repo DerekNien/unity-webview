@@ -64,7 +64,7 @@ task :build do
   end
   ["Android"].each do |t|
     Dir.chdir("#{SRCDIR[0]}/#{t}") do
-      sh "git clean -dxf .; ./install.sh --unity /Applications/Unity5.6.1f1"
+      sh "git clean -dxf .; ./install.sh --unity /Applications/Unity/Hub/Editor/2019.4.26f1"
     end
   end
   ["Mac"].each do |t|
@@ -86,7 +86,7 @@ desc "buildnofragment"
 task :buildnofragment do
   ["Android"].each do |t|
     Dir.chdir("#{SRCDIR[0]}/#{t}") do
-      sh "git clean -dxf .; ./install-nofragment.sh --unity /Applications/Unity5.6.1f1"
+      sh "git clean -dxf .; ./install-nofragment.sh --unity /Applications/Unity/Hub/Editor/2019.4.26f1"
     end
   end
 end

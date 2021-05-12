@@ -16,7 +16,7 @@ UNITY_SRC_DIR="${JAVA_DIR}/com/unity3d/player"
 # options
 MODE="Release"
 SCRIPTING_BACKEND="il2cpp"
-UNITY="/Applications/Unity/Hub/Editor/2019.4.14f1"
+UNITY="/Applications/Unity/Hub/Editor/2019.4.26f1"
 
 for OPT in $*; do
   case $OPT in
