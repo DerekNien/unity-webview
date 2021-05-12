@@ -7,6 +7,8 @@ on Unity view. It works on Android, iOS, Unity Web Player, and Mac
 unity-webview is derived from keijiro-san's
 https://github.com/keijiro/unity-webview-integration .
 
+*NOTE: This plugin overlays native WebView/WKWebView views over unity's rendering view and doesn't support those views in 3D. https://github.com/gree/unity-webview/issues/658#issuecomment-793636658 discusses other solutions.*
+
 ## Sample Project
 
 It is placed under `sample/`. You can open it and import the plugin as
@@ -33,6 +35,20 @@ the following entry in your `Packages/manifest.json`:
   }
 }
 ```
+
+or the following for selecting the variant without Fragment:
+
+```json
+{
+  "dependencies": {
+    ...
+    "net.gree.unity-webview": "https://github.com/gree/unity-webview.git?path=/dist/package-nofragment",
+    ...
+  }
+}
+```
+
+*NOTE: Importing with Package Manager currently doesn't work well for WebGL. Please check the instruction for `dist/unity-webview.unitypackage`.*
 
 ## Common Notes
 
@@ -274,7 +290,9 @@ $ ./install.sh
 
 ### WebGL
 
-After importing `dist/unity-webview.unitypackage` or `dist/unity-webview.zip`, please copy `WebGLTemplates/Default/TemplateData` from your Unity installation to `Assets/WebGLTemplates/unity-webivew`. If you utilize Unity 2019.4.13f1 for example,
+*NOTE: for Unity 2020.1.0f1 or newer, please use `unity-webview-2020` instead of `unity-webview` below.*
+
+After importing `dist/unity-webview.unitypackage` or `dist/unity-webview.zip`, please copy `WebGLTemplates/Default/TemplateData` from your Unity installation to `Assets/WebGLTemplates/unity-webivew`. If you utilize Unity 2018.4.13f1 for example,
 
 ```bash
 $ cp -a /Applications/Unity/Hub/Editor/2018.4.13f1/PlaybackEngines/WebGLSupport/BuildTools/WebGLTemplates/Default/TemplateData Assets/WebGLTemplates/unity-webview

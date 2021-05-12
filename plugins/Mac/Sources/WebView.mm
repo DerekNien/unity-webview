@@ -50,6 +50,7 @@ static BOOL s_useMetal;
 @implementation CWebViewPlugin
 
 static WKProcessPool *_sharedProcessPool;
+static NSMutableArray *_instances = [[NSMutableArray alloc] init];
 static std::unordered_map<int, int> _nskey2cgkey{
     { NSUpArrowFunctionKey,          126 },
     { NSDownArrowFunctionKey,        125 },
@@ -125,7 +126,7 @@ static std::unordered_map<int, int> _nskey2cgkey{
     { NSModeSwitchFunctionKey,         0 },
 };
 
-- (id)initWithGameObject:(const char *)gameObject_ transparent:(BOOL)transparent width:(int)width height:(int)height ua:(const char *)ua separated:(BOOL)separated
+- (id)initWithGameObject:(const char *)gameObject_ transparent:(BOOL)transparent zoom:(BOOL)zoom width:(int)width height:(int)height ua:(const char *)ua separated:(BOOL)separated
 {
     self = [super init];
     @synchronized(self) {
@@ -144,6 +145,25 @@ static std::unordered_map<int, int> _nskey2cgkey{
     preferences.javaScriptEnabled = true;
     preferences.plugInsEnabled = true;
     [controller addScriptMessageHandler:self name:@"unityControl"];
+    if (!zoom) {
+        WKUserScript *script
+            = [[WKUserScript alloc]
+                      initWithSource:@"\
+(function() { \
+    var meta = document.querySelector('meta[name=viewport]'); \
+    if (meta == null) { \
+        meta = document.createElement('meta'); \
+        meta.name = 'viewport'; \
+    } \
+    meta.content += ((meta.content.length > 0) ? ',' : '') + 'user-scalable=no'; \
+    var head = document.getElementsByTagName('head')[0]; \
+    head.appendChild(meta); \
+})(); \
+"
+                       injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
+                    forMainFrameOnly:YES];
+        [controller addUserScript:script];
+    }
     configuration.userContentController = controller;
     configuration.processPool = _sharedProcessPool;
     // configuration.preferences = preferences;
@@ -206,6 +226,91 @@ static std::unordered_map<int, int> _nskey2cgkey{
         customRequestHeader = nil;
         messages = nil;
     }
+}
+
++ (void)resetSharedProcessPool
+{
+    // cf. https://stackoverflow.com/questions/33156567/getting-all-cookies-from-wkwebview/49744695#49744695
+    _sharedProcessPool = [[WKProcessPool alloc] init];
+    [_instances enumerateObjectsUsingBlock:^(CWebViewPlugin *obj, NSUInteger idx, BOOL *stop) {
+        if ([obj->webView isKindOfClass:[WKWebView class]]) {
+            WKWebView *webView = (WKWebView *)obj->webView;
+            webView.configuration.processPool = _sharedProcessPool;
+        }
+    }];
+}
+
++ (void)clearCookies
+{
+    [CWebViewPlugin resetSharedProcessPool];
+
+    // cf. https://dev.classmethod.jp/smartphone/remove-webview-cookies/
+    NSString *libraryPath = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *cookiesPath = [libraryPath stringByAppendingPathComponent:@"Cookies"];
+    NSString *webKitPath = [libraryPath stringByAppendingPathComponent:@"WebKit"];
+    [[NSFileManager defaultManager] removeItemAtPath:cookiesPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:webKitPath error:nil];
+
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    if (cookieStorage == nil) {
+        // cf. https://stackoverflow.com/questions/33876295/nshttpcookiestorage-sharedhttpcookiestorage-comes-up-empty-in-10-11
+        cookieStorage = [NSHTTPCookieStorage sharedCookieStorageForGroupContainerIdentifier:@"Cookies"];
+    }
+    [[cookieStorage cookies] enumerateObjectsUsingBlock:^(NSHTTPCookie *cookie, NSUInteger idx, BOOL *stop) {
+        [cookieStorage deleteCookie:cookie];
+    }];
+
+    NSOperatingSystemVersion version = { 10, 11, 0 };
+    if ([[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:version]) {
+        NSSet *websiteDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+        NSDate *date = [NSDate dateWithTimeIntervalSince1970:0];
+        [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:websiteDataTypes
+                                                   modifiedSince:date
+                                               completionHandler:^{}];
+    }
+}
+
++ (void)saveCookies
+{
+    [CWebViewPlugin resetSharedProcessPool];
+}
+
++ (const char *)getCookies:(const char *)url
+{
+    [CWebViewPlugin resetSharedProcessPool];
+
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    [formatter setDateFormat:@"EEE, dd MMM yyyy HH:mm:ss zzz"];
+    NSMutableString *result = [NSMutableString string];
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    if (cookieStorage == nil) {
+        // cf. https://stackoverflow.com/questions/33876295/nshttpcookiestorage-sharedhttpcookiestorage-comes-up-empty-in-10-11
+        cookieStorage = [NSHTTPCookieStorage sharedCookieStorageForGroupContainerIdentifier:@"Cookies"];
+    }
+    [[cookieStorage cookiesForURL:[NSURL URLWithString:[[NSString alloc] initWithUTF8String:url]]]
+        enumerateObjectsUsingBlock:^(NSHTTPCookie *cookie, NSUInteger idx, BOOL *stop) {
+            [result appendString:[NSString stringWithFormat:@"%@=%@", cookie.name, cookie.value]];
+            if ([cookie.domain length] > 0) {
+                [result appendString:[NSString stringWithFormat:@"; "]];
+                [result appendString:[NSString stringWithFormat:@"Domain=%@", cookie.domain]];
+            }
+            if ([cookie.path length] > 0) {
+                [result appendString:[NSString stringWithFormat:@"; "]];
+                [result appendString:[NSString stringWithFormat:@"Path=%@", cookie.path]];
+            }
+            if (cookie.expiresDate != nil) {
+                [result appendString:[NSString stringWithFormat:@"; "]];
+                [result appendString:[NSString stringWithFormat:@"Expires=%@", [formatter stringFromDate:cookie.expiresDate]]];
+            }
+            [result appendString:[NSString stringWithFormat:@"; "]];
+            [result appendString:[NSString stringWithFormat:@"Version=%zd", cookie.version]];
+            [result appendString:[NSString stringWithFormat:@"\n"]];
+        }];
+    const char *s = [result UTF8String];
+    char *r = (char *)malloc(strlen(s) + 1);
+    strcpy(r, s);
+    return r;
 }
 
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error
@@ -748,7 +853,7 @@ extern "C" {
     const char *_CWebViewPlugin_GetAppPath(void);
     void _CWebViewPlugin_InitStatic(BOOL inEditor, BOOL useMetal);
     void *_CWebViewPlugin_Init(
-        const char *gameObject, BOOL transparent, int width, int height, const char *ua, BOOL separated);
+        const char *gameObject, BOOL transparent, BOOL zoom, int width, int height, const char *ua, BOOL separated);
     void _CWebViewPlugin_Destroy(void *instance);
     void _CWebViewPlugin_SetRect(void *instance, int width, int height);
     void _CWebViewPlugin_SetVisibility(void *instance, BOOL visibility);
@@ -772,6 +877,9 @@ extern "C" {
     void _CWebViewPlugin_RemoveCustomHeader(void *instance, const char *headerKey);
     void _CWebViewPlugin_ClearCustomHeader(void *instance);
     const char *_CWebViewPlugin_GetCustomHeaderValue(void *instance, const char *headerKey);
+    void _CWebViewPlugin_ClearCookies();
+    void _CWebViewPlugin_SaveCookies();
+    const char *_CWebViewPlugin_GetCookies(const char *url);
     const char *_CWebViewPlugin_GetMessage(void *instance);
 #ifdef __cplusplus
 }
@@ -785,8 +893,6 @@ const char *_CWebViewPlugin_GetAppPath(void)
     return r;
 }
 
-static NSMutableSet *pool;
-
 void _CWebViewPlugin_InitStatic(BOOL inEditor, BOOL useMetal)
 {
     s_inEditor = inEditor;
@@ -794,20 +900,17 @@ void _CWebViewPlugin_InitStatic(BOOL inEditor, BOOL useMetal)
 }
 
 void *_CWebViewPlugin_Init(
-    const char *gameObject, BOOL transparent, int width, int height, const char *ua, BOOL separated)
+    const char *gameObject, BOOL transparent, BOOL zoom, int width, int height, const char *ua, BOOL separated)
 {
-    if (pool == 0)
-        pool = [[NSMutableSet alloc] init];
-
-    CWebViewPlugin *webViewPlugin = [[CWebViewPlugin alloc] initWithGameObject:gameObject transparent:transparent width:width height:height ua:ua separated:separated];
-    [pool addObject:webViewPlugin];
+    CWebViewPlugin *webViewPlugin = [[CWebViewPlugin alloc] initWithGameObject:gameObject transparent:transparent zoom:zoom width:width height:height ua:ua separated:separated];
+    [_instances addObject:webViewPlugin];
     return (__bridge_retained void *)webViewPlugin;
 }
 
 void _CWebViewPlugin_Destroy(void *instance)
 {
     CWebViewPlugin *webViewPlugin = (__bridge_transfer CWebViewPlugin *)instance;
-    [pool removeObject:webViewPlugin];
+    [_instances removeObject:webViewPlugin];
     [webViewPlugin dispose];
     webViewPlugin = nil;
 }
@@ -942,6 +1045,21 @@ void _CWebViewPlugin_ClearCustomHeader(void *instance)
 {
     CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin clearCustomRequestHeader];
+}
+
+void _CWebViewPlugin_ClearCookies()
+{
+    [CWebViewPlugin clearCookies];
+}
+
+void _CWebViewPlugin_SaveCookies()
+{
+    [CWebViewPlugin saveCookies];
+}
+
+const char *_CWebViewPlugin_GetCookies(const char *url)
+{
+    return [CWebViewPlugin getCookies:url];
 }
 
 const char *_CWebViewPlugin_GetMessage(void *instance)

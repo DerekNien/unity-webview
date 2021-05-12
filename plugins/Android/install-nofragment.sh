@@ -47,12 +47,9 @@ rm -f ${BUILD_DIR}/src/main/com/unity3d/player/UnityPlayerActivity.java
 
 pushd $CWD
 
-# copy unity library
-DEST_DIR='../../build/Packager/Assets/Plugins/Android'
-
+# build
 mkdir -p ${LIBS_DIR}
 mkdir -p ${BIN_DIR}
-mkdir -p ${DEST_DIR}
 mkdir -p ${JAVA_DIR}
 mkdir -p ${UNITY_SRC_DIR}
 
@@ -61,16 +58,13 @@ cp ${UNITY_JAVA_SRC} ${UNITY_SRC_DIR}
 cp -r src-nofragment/net ${JAVA_DIR}
 cp AndroidManifest.xml ${BUILD_DIR}/src/main
 
-# build
-./gradlew assembleRelease
-
-if [ ${JAR_CMD} = "" ];then
-  echo "jar command does not exist"
-else
-  jar cvf ${CWD}/bin/WebViewPlugin.jar -C ${BUILD_DIR}/build/intermediates/classes/release net
-  cp -a ${BIN_DIR}/WebViewPlugin.jar ${DEST_DIR}
-fi
-
 ./gradlew clean
+./gradlew assembleRelease
+cp ${BUILD_DIR}/build/outputs/aar/*.aar ${BIN_DIR}/WebViewPlugins.aar
+
+# install
+DEST_DIR='../../build/Packager/Assets/Plugins/Android'
+mkdir -p ${DEST_DIR}
+cp ${BIN_DIR}/WebViewPlugins.aar ${DEST_DIR}/WebViewPlugin.aar
 
 popd # $BUILD_DIR
