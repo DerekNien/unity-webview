@@ -1,15 +1,15 @@
 /*
  * Copyright (C) 2011 Keijiro Takahashi
  * Copyright (C) 2012 GREE, Inc.
- * 
+ *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
  * arising from the use of this software.
- * 
+ *
  * Permission is granted to anyone to use this software for any purpose,
  * including commercial applications, and to alter it and redistribute it
  * freely, subject to the following restrictions:
- * 
+ *
  * 1. The origin of this software must not be misrepresented; you must not
  *    claim that you wrote the original software. If you use this software
  *    in a product, an acknowledgment in the product documentation would be
@@ -27,10 +27,12 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.net.Uri;
 import android.os.Build;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
@@ -91,6 +93,7 @@ class CWebViewPluginInterface {
 public class CWebViewPlugin {
     private static FrameLayout layout = null;
     private WebView mWebView;
+    private View mVideoView;
     private OnGlobalLayoutListener mGlobalLayoutListener;
     private CWebViewPluginInterface mWebViewPlugin;
     private int progress;
@@ -137,7 +140,7 @@ public class CWebViewPlugin {
         return mWebView != null;
     }
 
-    public void Init(final String gameObject, final boolean transparent, final String ua) {
+    public void Init(final String gameObject, final boolean transparent, final boolean zoom, final int androidForceDarkMode, final String ua) {
         final CWebViewPlugin self = this;
         final Activity a = UnityPlayer.currentActivity;
         a.runOnUiThread(new Runnable() {public void run() {
@@ -146,7 +149,7 @@ public class CWebViewPlugin {
             }
             mAlertDialogEnabled = true;
             mCustomHeaders = new Hashtable<String, String>();
-            
+
             final WebView webView = new WebView(a);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                 try {
@@ -168,8 +171,6 @@ public class CWebViewPlugin {
             //     }
             // });
             webView.setWebChromeClient(new WebChromeClient() {
-                View videoView;
-
                 // cf. https://stackoverflow.com/questions/40659198/how-to-access-the-camera-from-within-a-webview/47525818#47525818
                 // cf. https://github.com/googlesamples/android-PermissionRequest/blob/eff1d21f0b9c91d67c7f2a2303b591447e61e942/Application/src/main/java/com/example/android/permissionrequest/PermissionRequestFragment.java#L148-L161
                 @Override
@@ -201,9 +202,9 @@ public class CWebViewPlugin {
                 public void onShowCustomView(View view, CustomViewCallback callback) {
                     super.onShowCustomView(view, callback);
                     if (layout != null) {
-                        videoView = view;
+                        mVideoView = view;
                         layout.setBackgroundColor(0xff000000);
-                        layout.addView(videoView);
+                        layout.addView(mVideoView);
                     }
                 }
 
@@ -211,9 +212,9 @@ public class CWebViewPlugin {
                 public void onHideCustomView() {
                     super.onHideCustomView();
                     if (layout != null) {
-                        layout.removeView(videoView);
+                        layout.removeView(mVideoView);
                         layout.setBackgroundColor(0x00000000);
-                        videoView = null;
+                        mVideoView = null;
                     }
                 }
 
@@ -259,10 +260,10 @@ public class CWebViewPlugin {
                     canGoForward = webView.canGoForward();
                     mWebViewPlugin.call("CallOnError", errorCode + "\t" + description + "\t" + failingUrl);
                 }
-                
+
                 @Override
                 public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
-                	canGoBack = webView.canGoBack();
+                    canGoBack = webView.canGoBack();
                     canGoForward = webView.canGoForward();
                     mWebViewPlugin.call("CallOnHttpError", Integer.toString(errorResponse.getStatusCode()));
                 }
@@ -297,22 +298,57 @@ public class CWebViewPlugin {
                 }
 
                 @Override
-                public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                public WebResourceResponse shouldInterceptRequest(WebView view, final String url) {
                     if (mCustomHeaders == null || mCustomHeaders.isEmpty()) {
                         return super.shouldInterceptRequest(view, url);
                     }
 
                     try {
                         HttpURLConnection urlCon = (HttpURLConnection) (new URL(url)).openConnection();
+                        urlCon.setInstanceFollowRedirects(false);
                         // The following should make HttpURLConnection have a same user-agent of webView)
                         // cf. http://d.hatena.ne.jp/faw/20070903/1188796959 (in Japanese)
                         urlCon.setRequestProperty("User-Agent", mWebViewUA);
+
+                        if (mBasicAuthUserName != null && mBasicAuthPassword != null) {
+                            String authorization = mBasicAuthUserName + ":" + mBasicAuthPassword;
+                            urlCon.setRequestProperty("Authorization", "Basic " + Base64.encodeToString(authorization.getBytes(), Base64.NO_WRAP));
+                        }
+
+                        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.KITKAT && Build.VERSION.SDK_INT != Build.VERSION_CODES.KITKAT_WATCH) {
+                            // cf. https://issuetracker.google.com/issues/36989494
+                            String cookies = GetCookies(url);
+                            if (cookies != null && !cookies.isEmpty()) {
+                                urlCon.addRequestProperty("Cookie", cookies);
+                            }
+                        }
 
                         for (HashMap.Entry<String, String> entry: mCustomHeaders.entrySet()) {
                             urlCon.setRequestProperty(entry.getKey(), entry.getValue());
                         }
 
                         urlCon.connect();
+
+                        int responseCode = urlCon.getResponseCode();
+                        if (responseCode >= 300 && responseCode < 400) {
+                            // To avoid a problem due to a mismatch between requested URL and returned content,
+                            // make WebView request again in the case that redirection response was returned.
+                            return null;
+                        }
+
+                        final List<String> setCookieHeaders = urlCon.getHeaderFields().get("Set-Cookie");
+                        if (setCookieHeaders != null) {
+                            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT || Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT_WATCH) {
+                                // In addition to getCookie, setCookie cause deadlock on Android 4.4.4 cf. https://issuetracker.google.com/issues/36989494
+                                UnityPlayer.currentActivity.runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        SetCookies(url, setCookieHeaders);
+                                    }
+                                });
+                            } else {
+                                SetCookies(url, setCookieHeaders);
+                            }
+                        }
 
                         return new WebResourceResponse(
                             urlCon.getContentType().split(";", 2)[0],
@@ -345,8 +381,11 @@ public class CWebViewPlugin {
                     } else if (mHookRegex != null && mHookRegex.matcher(url).find()) {
                         mWebViewPlugin.call("CallOnHooked", url);
                         return true;
-                    } else if (url.startsWith("http://") || url.startsWith("https://")
-                        || url.startsWith("file://") || url.startsWith("javascript:")) {
+                    } else if (!url.toLowerCase().endsWith(".pdf")
+                        && (url.startsWith("http://")
+                            || url.startsWith("https://")
+                            || url.startsWith("file://")
+                            || url.startsWith("javascript:"))) {
                         mWebViewPlugin.call("CallOnStarted", url);
                         // Let webview handle the URL
                         return false;
@@ -367,13 +406,19 @@ public class CWebViewPlugin {
                 webSettings.setUserAgentString(ua);
             }
             mWebViewUA = webSettings.getUserAgentString();
-            webSettings.setSupportZoom(true);
-            webSettings.setBuiltInZoomControls(true);
+            if (zoom) {
+                webSettings.setSupportZoom(true);
+                webSettings.setBuiltInZoomControls(true);
+            } else {
+                webSettings.setSupportZoom(false);
+                webSettings.setBuiltInZoomControls(false);
+            }
             webSettings.setDisplayZoomControls(false);
             webSettings.setLoadWithOverviewMode(true);
             webSettings.setUseWideViewPort(true);
             webSettings.setJavaScriptEnabled(true);
             webSettings.setGeolocationEnabled(true);
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
                 // Log.i("CWebViewPlugin", "Build.VERSION.SDK_INT = " + Build.VERSION.SDK_INT);
                 webSettings.setAllowUniversalAccessFromFileURLs(true);
@@ -385,6 +430,32 @@ public class CWebViewPlugin {
             webSettings.setDomStorageEnabled(true);
             String databasePath = webView.getContext().getDir("databases", Context.MODE_PRIVATE).getPath();
             webSettings.setDatabasePath(databasePath);
+            webSettings.setAllowFileAccess(true);  // cf. https://github.com/gree/unity-webview/issues/625
+
+            // cf. https://forum.unity.com/threads/unity-ios-dark-mode.805344/#post-6476051
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                switch (androidForceDarkMode) {
+                case 0:
+                    {
+                        Configuration configuration = UnityPlayer.currentActivity.getResources().getConfiguration();
+                        switch (configuration.uiMode & Configuration.UI_MODE_NIGHT_MASK) {
+                        case Configuration.UI_MODE_NIGHT_NO:
+                            webSettings.setForceDark(WebSettings.FORCE_DARK_OFF);
+                            break;
+                        case Configuration.UI_MODE_NIGHT_YES:
+                            webSettings.setForceDark(WebSettings.FORCE_DARK_ON);
+                            break;
+                        }
+                    }
+                    break;
+                case 1:
+                    webSettings.setForceDark(WebSettings.FORCE_DARK_OFF);
+                    break;
+                case 2:
+                    webSettings.setForceDark(WebSettings.FORCE_DARK_ON);
+                    break;
+                }
+            }
 
             if (transparent) {
                 webView.setBackgroundColor(0x00000000);
@@ -450,6 +521,11 @@ public class CWebViewPlugin {
                 mGlobalLayoutListener = null;
             }
             mWebView.stopLoading();
+            if (mVideoView != null) {
+                layout.removeView(mVideoView);
+                layout.setBackgroundColor(0x00000000);
+                mVideoView = null;
+            }
             layout.removeView(mWebView);
             mWebView.destroy();
             mWebView = null;
@@ -644,7 +720,7 @@ public class CWebViewPlugin {
 
     public void ClearCookies()
     {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
         {
            CookieManager.getInstance().removeAllCookies(null);
            CookieManager.getInstance().flush();
@@ -680,9 +756,44 @@ public class CWebViewPlugin {
         return cookieManager.getCookie(url);
     }
 
+    public void SetCookies(String url, List<String> setCookieHeaders)
+    {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+        {
+           CookieManager cookieManager = CookieManager.getInstance();
+           for (String header : setCookieHeaders)
+           {
+              cookieManager.setCookie(url, header);
+           }
+           cookieManager.flush();
+        } else {
+           final Activity a = UnityPlayer.currentActivity;
+           CookieSyncManager cookieSyncManager = CookieSyncManager.createInstance(a);
+           cookieSyncManager.startSync();
+           CookieManager cookieManager = CookieManager.getInstance();
+           for (String header : setCookieHeaders)
+           {
+              cookieManager.setCookie(url, header);
+           }
+           cookieSyncManager.stopSync();
+           cookieSyncManager.sync();
+        }
+    }
+
     public void SetBasicAuthInfo(final String userName, final String password)
     {
         mBasicAuthUserName = userName;
         mBasicAuthPassword = password;
+    }
+
+    public void ClearCache(final boolean includeDiskFiles)
+    {
+        final Activity a = UnityPlayer.currentActivity;
+        a.runOnUiThread(new Runnable() {public void run() {
+            if (mWebView == null) {
+                return;
+            }
+            mWebView.clearCache(includeDiskFiles);
+        }});
     }
 }

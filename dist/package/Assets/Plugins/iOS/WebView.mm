@@ -108,7 +108,7 @@ extern "C" void UnitySendMessage(const char *, const char *, const char *);
 static WKProcessPool *_sharedProcessPool;
 static NSMutableArray *_instances = [[NSMutableArray alloc] init];
 
-- (id)initWithGameObjectName:(const char *)gameObjectName_ transparent:(BOOL)transparent ua:(const char *)ua enableWKWebView:(BOOL)enableWKWebView
+- (id)initWithGameObjectName:(const char *)gameObjectName_ transparent:(BOOL)transparent zoom:(BOOL)zoom ua:(const char *)ua enableWKWebView:(BOOL)enableWKWebView contentMode:(WKContentMode)contentMode
 {
     self = [super init];
 
@@ -120,10 +120,6 @@ static NSMutableArray *_instances = [[NSMutableArray alloc] init];
     hookRegex = nil;
     basicAuthUserName = nil;
     basicAuthPassword = nil;
-    if (ua != NULL && strcmp(ua, "") != 0) {
-        [[NSUserDefaults standardUserDefaults]
-            registerDefaults:@{ @"UserAgent": [[NSString alloc] initWithUTF8String:ua] }];
-    }
     UIView *view = UnityGetGLViewController().view;
     if (enableWKWebView && [WKWebView class]) {
         if (_sharedProcessPool == NULL) {
@@ -132,6 +128,25 @@ static NSMutableArray *_instances = [[NSMutableArray alloc] init];
         WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
         WKUserContentController *controller = [[WKUserContentController alloc] init];
         [controller addScriptMessageHandler:self name:@"unityControl"];
+        if (!zoom) {
+            WKUserScript *script
+                = [[WKUserScript alloc]
+                      initWithSource:@"\
+(function() { \
+    var meta = document.querySelector('meta[name=viewport]'); \
+    if (meta == null) { \
+        meta = document.createElement('meta'); \
+        meta.name = 'viewport'; \
+    } \
+    meta.content += ((meta.content.length > 0) ? ',' : '') + 'user-scalable=no'; \
+    var head = document.getElementsByTagName('head')[0]; \
+    head.appendChild(meta); \
+})(); \
+"
+                       injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
+                    forMainFrameOnly:YES];
+            [controller addUserScript:script];
+        }
         configuration.userContentController = controller;
         configuration.allowsInlineMediaPlayback = true;
         if (@available(iOS 10.0, *)) {
@@ -145,9 +160,22 @@ static NSMutableArray *_instances = [[NSMutableArray alloc] init];
         }
         configuration.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
         configuration.processPool = _sharedProcessPool;
+        if (@available(iOS 13.0, *)) {
+            configuration.defaultWebpagePreferences.preferredContentMode = contentMode;
+        }
         webView = [[WKWebView alloc] initWithFrame:view.frame configuration:configuration];
         webView.UIDelegate = self;
         webView.navigationDelegate = self;
+        if (ua != NULL && strcmp(ua, "") != 0) {
+            ((WKWebView *)webView).customUserAgent = [[NSString alloc] initWithUTF8String:ua];
+        }
+        // cf. https://rick38yip.medium.com/wkwebview-weird-spacing-issue-in-ios-13-54a4fc686f72
+        // cf. https://stackoverflow.com/questions/44390971/automaticallyadjustsscrollviewinsets-was-deprecated-in-ios-11-0
+        if (@available(iOS 11.0, *)) {
+            ((WKWebView *)webView).scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        } else {
+            //UnityGetGLViewController().automaticallyAdjustsScrollViewInsets = false;
+        }
     } else {
         webView = nil;
         return self;
@@ -316,6 +344,15 @@ static NSMutableArray *_instances = [[NSMutableArray alloc] init];
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error
 {
     UnitySendMessage([gameObjectName UTF8String], "CallOnError", [[error description] UTF8String]);
+}
+
+- (WKWebView *)webView:(WKWebView *)wkWebView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)navigationAction windowFeatures:(WKWindowFeatures *)windowFeatures
+{
+    // cf. for target="_blank", cf. http://qiita.com/ShingoFukuyama/items/b3a1441025a36ab7659c
+    if (!navigationAction.targetFrame.isMainFrame) {
+        [wkWebView loadRequest:navigationAction.request];
+    }
+    return nil;
 }
 
 - (void)webView:(WKWebView *)wkWebView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
@@ -703,10 +740,22 @@ static NSMutableArray *_instances = [[NSMutableArray alloc] init];
     basicAuthUserName = [NSString stringWithUTF8String:userName];
     basicAuthPassword = [NSString stringWithUTF8String:password];
 }
+
+- (void)clearCache:(BOOL)includeDiskFiles
+{
+    if (webView == nil)
+        return;
+    NSMutableSet *types = [NSMutableSet setWithArray:@[WKWebsiteDataTypeMemoryCache]];
+    if (includeDiskFiles) {
+        [types addObject:WKWebsiteDataTypeDiskCache];
+    }
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:0];
+    [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:types modifiedSince:date completionHandler:^{}];
+}
 @end
 
 extern "C" {
-    void *_CWebViewPlugin_Init(const char *gameObjectName, BOOL transparent, const char *ua, BOOL enableWKWebView);
+    void *_CWebViewPlugin_Init(const char *gameObjectName, BOOL transparent, BOOL zoom, const char *ua, BOOL enableWKWebView, int contentMode);
     void _CWebViewPlugin_Destroy(void *instance);
     void _CWebViewPlugin_SetMargins(
         void *instance, float left, float top, float right, float bottom, BOOL relative);
@@ -731,13 +780,26 @@ extern "C" {
     const char *_CWebViewPlugin_GetCookies(const char *url);
     const char *_CWebViewPlugin_GetCustomHeaderValue(void *instance, const char *headerKey);
     void _CWebViewPlugin_SetBasicAuthInfo(void *instance, const char *userName, const char *password);
+    void _CWebViewPlugin_ClearCache(void *instance, BOOL includeDiskFiles);
 }
 
-void *_CWebViewPlugin_Init(const char *gameObjectName, BOOL transparent, const char *ua, BOOL enableWKWebView)
+void *_CWebViewPlugin_Init(const char *gameObjectName, BOOL transparent, BOOL zoom, const char *ua, BOOL enableWKWebView, int contentMode)
 {
     if (! (enableWKWebView && [WKWebView class]))
         return nil;
-    CWebViewPlugin *webViewPlugin = [[CWebViewPlugin alloc] initWithGameObjectName:gameObjectName transparent:transparent ua:ua enableWKWebView:enableWKWebView];
+    WKContentMode wkContentMode = WKContentModeRecommended;
+    switch (contentMode) {
+    case 1:
+        wkContentMode = WKContentModeMobile;
+        break;
+    case 2:
+        wkContentMode = WKContentModeDesktop;
+        break;
+    default:
+        wkContentMode = WKContentModeRecommended;
+        break;
+    }
+    CWebViewPlugin *webViewPlugin = [[CWebViewPlugin alloc] initWithGameObjectName:gameObjectName transparent:transparent zoom:zoom ua:ua enableWKWebView:enableWKWebView contentMode:wkContentMode];
     [_instances addObject:webViewPlugin];
     return (__bridge_retained void *)webViewPlugin;
 }
@@ -918,6 +980,14 @@ void _CWebViewPlugin_SetBasicAuthInfo(void *instance, const char *userName, cons
         return;
     CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin setBasicAuthInfo:userName password:password];
+}
+
+void _CWebViewPlugin_ClearCache(void *instance, BOOL includeDiskFiles)
+{
+    if (instance == NULL)
+        return;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
+    [webViewPlugin clearCache:includeDiskFiles];
 }
 
 #endif // !(__IPHONE_OS_VERSION_MIN_REQUIRED < __IPHONE_9_0)
